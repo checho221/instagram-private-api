@@ -1,25 +1,11 @@
-var _ = require("lodash");
 var errors = require('request-promise/errors');
 var Promise = require('bluebird');
 var util = require('util');
 
-var Session = require('../session');
-var routes = require('../routes');
-var CONSTANTS = require('../constants');
 var WebRequest = require('./web-request');
 var Request = require('../request');
-var Helpers = require('../../../helpers');
 var Exceptions = require("../exceptions");
-var ORIGIN = CONSTANTS.WEBHOST.slice(0, -1); // Trailing / in origin
 
-// iPhone probably works best, even from android previosly done request
-var iPhoneUserAgent = 'Instagram 19.0.0.27.91 (iPhone6,1; iPhone OS 9_3_1; en_US; en; scale=2.00; gamut=normal; 640x1136) AppleWebKit/420+';
-var iPhoneUserAgentHtml = 'Mozilla/5.0 (iPhone; CPU iPhone OS 9_3_1 like Mac OS X) AppleWebKit/601.1.46 (KHTML, like Gecko) Mobile/13E238 Instagram 10.28.0 (iPhone6,1; iPhone OS 9_3_1; en_US; en; scale=2.00; gamut=normal; 640x1136)'
-
-var EMAIL_FIELD_REGEXP = /email.*value(.*)"/i;
-var PHONE_FIELD_REGEXP = /sms.*value(.*)"/i;
-var PHONE_ENTERED_FIELD_REGEXP = /tel.*value="(\+\d+)"/i
-var RESET_FIELD_REGEXP = /reset_progress_form.*action="\/(.*)"/i
 var SHARED_JSON_REGEXP = /window._sharedData = (.*);<\/script>/i
 
 var Challenge = function(session, type, error, json) {
@@ -27,8 +13,54 @@ var Challenge = function(session, type, error, json) {
     this._session = session;
     this._type = type;
     this._error = error;
-    this.apiUrl = 'https://i.instagram.com/api/v1'+error.json.challenge.api_path;
+    this.apiUrl = error.apiUrl;
 };
+
+Challenge.handleResponse = async function handleChallengeResponse (response, checkpointError, defaultMethod) {
+    const session = checkpointError.session
+    let json
+    try {
+        json = JSON.parse(response.body);
+    } catch (e) {
+        if (response.body.includes('url=instagram://checkpoint/dismiss')) throw new Exceptions.NoChallengeRequired
+        throw new TypeError('Invalid response. JSON expected')
+    }
+    //Using html unlock if native is not supported
+    if (json.challenge && json.challenge.native_flow === false) return this.resolveHtml(checkpointError, defaultMethod)
+    //Challenge is not required
+    if (json.status === 'ok' && json.action === 'close') throw new Exceptions.NoChallengeRequired
+    const apiChallengeUrl = 'https://i.instagram.com/api/v1'+checkpointError.json.challenge.api_path;
+    //Using API-version of challenge
+    switch (json.step_name) {
+        case 'select_verify_method': {
+            const selectResponse = await new WebRequest(session)
+              .setMethod('POST')
+              .setUrl(apiChallengeUrl)
+              .setData({
+                  'choice': json.step_data.choice,
+              })
+              .send({followRedirect: true})
+            return this.handleResponse(selectResponse, checkpointError, defaultMethod)
+        }
+        case 'verify_code':
+        case 'submit_phone':
+            return new PhoneVerificationChallenge(session, 'phone', checkpointError, json)
+        case 'verify_email':
+            return new EmailVerificationChallenge(session, 'email', checkpointError, json)
+        case 'delta_login_review':
+            const deltaLoginResponse = await new WebRequest(session)
+              .setMethod('POST')
+              .setUrl(apiChallengeUrl)
+              .setData({
+                  'choice': 0 // 0 - It's was me // 1 - Not me, change password
+              })
+              .send({followRedirect: true})
+            return this.handleResponse(deltaLoginResponse, checkpointError, defaultMethod)
+        default:
+            return new NotImplementedChallenge(session, json.step_name, checkpointError, json)
+    }
+}
+
 //WARNING: This is NOT backward compatible code since most methods are not needed anymore. But you are free to make it backward compatible :)
 //How does it works now?
 //Well, we have two ways of resolving challange. Native and html versions.
@@ -37,83 +69,37 @@ var Challenge = function(session, type, error, json) {
 //Selecting method and sending code is diffenent, depending on native or html style.
 //As soon as we got the code we can confirm it using Native version.
 //Oh, and code confirm is same now for email and phone checkpoints
-Challenge.resolve = function(checkpointError,defaultMethod,skipResetStep){
-    var that = this;
+Challenge.resolve = async function(checkpointError,defaultMethod,skipResetStep){
     checkpointError = checkpointError instanceof Exceptions.CheckpointError ? checkpointError : checkpointError.json;
-    if(!this.apiUrl) this.apiUrl = 'https://i.instagram.com/api/v1'+checkpointError.json.challenge.api_path;
     if(typeof defaultMethod==='undefined') defaultMethod = 'email';
     if(!(checkpointError instanceof Exceptions.CheckpointError)) throw new Error("`Challenge.resolve` method must get exception (type of `CheckpointError`) as a first argument");
-    if(['email','phone'].indexOf(defaultMethod)==-1) throw new Error('Invalid default method');
+    if(!['email','phone'].includes(defaultMethod)) throw new Error('Invalid default method');
     var session = checkpointError.session;
 
-    return new Promise(function(res,rej){
-        if(skipResetStep) return res();
-        return res(that.reset(checkpointError))
-    })
-    .then(function() {
-        return new WebRequest(session)
-            .setMethod('GET')
-            .setUrl(that.apiUrl)
-            .setHeaders({
-                'User-Agent': iPhoneUserAgent
-            })
-            .send({followRedirect: true})
-        })
-        .catch(errors.StatusCodeError, function(error){
-            return error.response;
-        })
-        .then(function(response){
-            try{
-                var json = JSON.parse(response.body);
-            }catch(e){
-                if(response.body.indexOf('url=instagram://checkpoint/dismiss')!=-1) throw new Exceptions.NoChallengeRequired;
-                throw new TypeError('Invalid response. JSON expected');
-            }
-            //Using html unlock if native is not supported
-        if(json.challenge && json.challenge.native_flow===false) return that.resolveHtml(checkpointError,defaultMethod)
-        //Challenge is not required
-        if(json.status==='ok' && json.action==='close') throw new Exceptions.NoChallengeRequired;
-
-        //Using API-version of challenge
-        switch(json.step_name){
-            case 'select_verify_method':{
-                return new WebRequest(session)
-                    .setMethod('POST')
-                    .setUrl(that.apiUrl)
-                    .setHeaders({
-                        'User-Agent': iPhoneUserAgent
-                    })
-                    .setData({
-                        "choice": defaultMethod==='email' ? 1 : 0
-                        })
-                        .send({followRedirect: true})
-                        .then(function(){
-                            return that.resolve(checkpointError,defaultMethod,true)
-                        })
-                }
-                case 'verify_code':
-                case 'submit_phone':{
-                    return new PhoneVerificationChallenge(session, 'phone', checkpointError, json);
-                }
-                case 'verify_email':{
-                    return new EmailVerificationChallenge(session, 'email', checkpointError, json);
-                }
-                default: return new NotImplementedChallenge(session, json.step_name, checkpointError, json);
-            }
-        })
+    const response = await Promise.try(async ()=>{
+        if(skipResetStep) return new WebRequest(session)
+          .setMethod('GET')
+          .setUrl('https://i.instagram.com/api/v1'+checkpointError.json.challenge.api_path)
+          .send({followRedirect: true})
+        // dirty hack for handleResponse()
+        return {
+            body: JSON.stringify(await this.reset(checkpointError))
+        }
+    }).catch(errors.StatusCodeError, error => error.response)
+    return this.handleResponse(response, checkpointError, defaultMethod);
 }
 Challenge.resolveHtml = function(checkpointError,defaultMethod){
     //Using html version
     var that = this;
     if(!(checkpointError instanceof Exceptions.CheckpointError)) throw new Error("`Challenge.resolve` method must get exception (type of `CheckpointError`) as a first argument");
-    if(['email','phone'].indexOf(defaultMethod)==-1) throw new Error('Invalid default method');
+    if(!['email','phone'].includes(defaultMethod)) throw new Error('Invalid default method');
     var session = checkpointError.session;
 
     return new WebRequest(session)
         .setMethod('GET')
         .setUrl(checkpointError.url)
         .setHeaders({
-            'User-Agent': iPhoneUserAgentHtml,
+            'User-Agent': session.device.userAgentWeb(),
             'Referer': checkpointError.url,
         })
         .send({followRedirect: true})
@@ -135,9 +121,9 @@ Challenge.resolveHtml = function(checkpointError,defaultMethod){
         }catch(e){
             throw new TypeError('Invalid response. JSON expected');
         }
-        if(defaultMethod=='email'){
+        if(defaultMethod==='email'){
             choice = challenge.fields.email ? 1 : 0
-        }else if(defaultMethod=='phone'){
+        }else if(defaultMethod==='phone'){
             choice = challenge.fields.phone_number ? 0 : 1
         }
 
@@ -147,7 +133,7 @@ Challenge.resolveHtml = function(checkpointError,defaultMethod){
                     .setMethod('POST')
                     .setUrl(checkpointError.url)
                     .setHeaders({
-                        'User-Agent': iPhoneUserAgentHtml,
+                        'User-Agent': session.device.userAgentWeb(),
                         'Referer': checkpointError.url,
                         'Content-Type': 'application/x-www-form-urlencoded',
                         'X-Instagram-AJAX': 1
@@ -160,46 +146,33 @@ Challenge.resolveHtml = function(checkpointError,defaultMethod){
                         return that.resolveHtml(checkpointError,defaultMethod)
                     })
             }
-            case 'VerifyEmailCodeForm':{
+            case 'VerifyEmailCodeForm':
                 return new EmailVerificationChallenge(session, 'email', checkpointError, json);
-            }
-            case 'VerifySMSCodeForm':{
+            case 'VerifySMSCodeForm':
                 return new PhoneVerificationChallenge(session, 'phone', checkpointError, json);
-            }
             default: return new NotImplementedChallenge(session, challenge.challengeType, checkpointError, json);
         }
     }
 }
 Challenge.reset = function(checkpointError){
-    var that = this;
-
     var session = checkpointError.session;
 
     return new Request(session)
         .setMethod('POST')
         .setBodyType('form')
-        .setUrl(that.apiUrl.replace('/challenge/','/challenge/reset/'))
-        .setHeaders({
-            'User-Agent': iPhoneUserAgent
-        })
+        .setUrl(checkpointError.apiUrl.replace('/challenge/','/challenge/reset/'))
         .signPayload()
         .send({followRedirect: true})
     .catch(function(error){
         return error.response;
     })
-    .then(function(response){
-        return that;
-    })
 }
 Challenge.prototype.code = function(code){
     var that = this;
-    if(!code||code.length!=6) throw new Error('Invalid code provided');
+    if(!code||code.length!==6) throw new Error('Invalid code provided');
     return new WebRequest(that.session)
         .setMethod('POST')
         .setUrl(that.apiUrl)
-        .setHeaders({
-            'User-Agent': iPhoneUserAgent
-        })
         .setBodyType('form')
         .setData({
             "security_code":code
@@ -212,11 +185,11 @@ Challenge.prototype.code = function(code){
             }catch(e){
                 throw new TypeError('Invalid response. JSON expected');
             }
-            if(response.statusCode == 200 && json.status==='ok' && (json.action==='close' || json.location==='instagram://checkpoint/dismiss')) return true;
+            if(response.statusCode === 200 && json.status==='ok' && (json.action==='close' || json.location==='instagram://checkpoint/dismiss')) return true;
             throw new Exceptions.NotPossibleToResolveChallenge('Unknown error',Exceptions.NotPossibleToResolveChallenge.CODE.UNKNOWN)
         })
         .catch(errors.StatusCodeError, function(error) {
-            if(error.statusCode == 400)throw new Exceptions.NotPossibleToResolveChallenge("Verification has not been accepted",Exceptions.NotPossibleToResolveChallenge.CODE.NOT_ACCEPTED);
+            if(error.statusCode === 400)throw new Exceptions.NotPossibleToResolveChallenge("Verification has not been accepted",Exceptions.NotPossibleToResolveChallenge.CODE.NOT_ACCEPTED);
             throw error;
         })
 }
@@ -256,9 +229,6 @@ PhoneVerificationChallenge.prototype.phone = function(phone){
     return new WebRequest(that.session)
         .setMethod('POST')
         .setUrl(that.apiUrl)
-        .setHeaders({
-            'User-Agent': iPhoneUserAgent
-        })
         .setBodyType('form')
         .setData({
             "phone_number": _phone
