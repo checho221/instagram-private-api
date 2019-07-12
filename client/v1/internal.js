@@ -70,7 +70,7 @@ Internal.launcherSync = function (session, preLogin) {
         })
         .setBodyType('form')
         .setData({
-            configs: ''
+            configs: 'ig_android_felix_release_players'
         })
 
     if(!preLogin) {
@@ -139,7 +139,7 @@ Internal.getRankedRecipients = function (session, mode) {
         .setResource('getRankedRecipients', {
             mode: mode,
             show_threads: true,
-            use_unified_inbox: true 
+            use_unified_inbox: true
         })
         .setBodyType('form')
         .send()
