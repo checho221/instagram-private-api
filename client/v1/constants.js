@@ -76,6 +76,7 @@ const ROUTES = {
     threadsBrodcastText: 'direct_v2/threads/broadcast/text/',
     threadsBrodcastLink: 'direct_v2/threads/broadcast/link/',
     threadsBrodcastShare: 'direct_v2/threads/broadcast/media_share/?media_type=photo',
+    threadsBrodcastStory: 'direct_v2/threads/broadcast/story_share/',
     threadsBrodcastProfile: 'direct_v2/threads/broadcast/profile/',
     threadsBrodcastHashtag: 'direct_v2/threads/broadcast/hashtag/',
     threadsBrodcastPhoto: 'direct_v2/threads/broadcast/configure_photo/',
