@@ -1,7 +1,8 @@
 var _ = require('lodash');
 
-function StoryTray(session) {
+function StoryTray(session, getOwners) {
     this.session = session;
+    this.getOwners = getOwners;
 }
 
 module.exports = StoryTray;
@@ -10,7 +11,7 @@ var Helpers = require('../../../helpers');
 var Media = require('../media');
 
 StoryTray.prototype.get = function () {
-
+    var that = this;
     var supported_capabilities = [
         {
             name: 'SUPPORTED_SDK_VERSIONS',
@@ -30,7 +31,7 @@ StoryTray.prototype.get = function () {
         }
     ]
 
-    return new Request(this.session)
+    return new Request(that.session)
         .setMethod('POST')
         .setResource('storyTray')
         .setBodyType('form')
@@ -38,13 +39,15 @@ StoryTray.prototype.get = function () {
         .setData({
             _uuid: this.session.uuid,
             _csrftoken: this.session.CSRFToken,
+            reason: 'pull_to_refresh',
             supported_capabilities_new: JSON.stringify(supported_capabilities)
         })
         .send()
         .then(function(data) {
-            var media = _.map(data.items, function(medium){
-                return new Media(this.session, medium);
+            var media = _.filter(data.tray, function(medium){
+                if (medium.items) {return new Media(that.session, medium.items)}
             });
-            return media;    
+
+            return media;
         });
 };

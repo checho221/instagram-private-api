@@ -76,6 +76,7 @@ const ROUTES = {
     threadsBrodcastText: 'direct_v2/threads/broadcast/text/',
     threadsBrodcastLink: 'direct_v2/threads/broadcast/link/',
     threadsBrodcastShare: 'direct_v2/threads/broadcast/media_share/?media_type=photo',
+    threadsBrodcastStory: 'direct_v2/threads/broadcast/story_share/?media_type=photo',
     threadsBrodcastProfile: 'direct_v2/threads/broadcast/profile/',
     threadsBrodcastHashtag: 'direct_v2/threads/broadcast/hashtag/',
     threadsBrodcastPhoto: 'direct_v2/threads/broadcast/configure_photo/',
@@ -104,9 +105,9 @@ const WEB_ROUTES = {
 }
 
 const PRIVATE_KEY = {
-    SIG_KEY: 'ac5f26ee05af3e40a81b94b78d762dc8287bcdd8254fe86d0971b2aded8884a4',
+    SIG_KEY: 'e0767f8a7ae9f6c1f9d3674be35d96117f0589960bf3dbd2921f020b33ca4b9f',
     SIG_VERSION: '4',
-    APP_VERSION: '64.0.0.14.96'
+    APP_VERSION: '100.0.0.17.129'
 }
 
 
