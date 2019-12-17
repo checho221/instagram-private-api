@@ -19,7 +19,7 @@ util.inherits(FeedBase, EventEmitter);
 FeedBase.prototype.all = function (parameters) {
     var that = this;
     parameters = _.isObject(parameters) ? parameters : {};
-    _.defaults(parameters, { delay: 1500 , every: 200, pause: 30000, maxErrors : 9, limit: this.limit });
+    _.defaults(parameters, { delay: 1500 , every: 150, pause: 180000, maxErrors : 9, limit: this.limit });
     // every N requests we take a pause
     var delay = this.iteration === 0 ? 0 : this.iteration%parameters.every !== 0 ? parameters.delay : parameters.pause;
     return Promise.delay(delay)
