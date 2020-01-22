@@ -36,7 +36,7 @@ WebRequest.prototype.setResource = function(resource, data) {
 
 WebRequest.prototype.setDevice = function(device) {
     if(!(device instanceof Device))
-        throw new Error("`device` parametr must be instance of `Device`") 
+        throw new Error("`device` parametr must be instance of `Device`")
     this._device = device;
     this.setHeaders({
         'User-Agent': device.userAgent()
@@ -62,6 +62,12 @@ WebRequest.prototype.setCSRFToken = function(token) {
     return this;
 };
 
+WebRequest.prototype.setSession = function(sessionid) {
+   var cookie = this._request.headers['cookie'] + `; sessionid=${sessionid}`;
+   delete this._request.headers['cookie']
+    this.setHeaders({cookie});
+    return this;
+};
 
 WebRequest.prototype.setHost = function(host) {
     if(!host) host = CONSTANTS.WEB_HOSTNAME;
@@ -77,13 +83,13 @@ WebRequest.prototype.send = function (options) {
     var that = this;
     return this._mergeOptions(options)
         .then(function(opts) {
-            return [opts, that._prepareData()];    
+            return [opts, that._prepareData()];
         })
         .spread(function(opts, data){
             opts = _.defaults(opts, data);
             return that._transform(opts);
         })
-        .then(function(opts) { 
+        .then(function(opts) {
             options = opts;
             return [Request.requestClient(options), options]
         })
@@ -94,7 +100,7 @@ WebRequest.prototype.send = function (options) {
                 return new Promise(function(resolve, reject) {
                     return resolve(beforeParse(response))
                 })
-                .then(parseMiddleware);          
+                .then(parseMiddleware);
             }
             return response;
         })
@@ -107,7 +113,7 @@ WebRequest.prototype.send = function (options) {
         })
         .catch(function (err) {
             if(!err || !err.response)
-                throw err;    
+                throw err;
             var response = err.response;
             if (response.statusCode == 404)
                 throw new Exceptions.NotFoundError(response);
