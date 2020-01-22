@@ -63,10 +63,8 @@ WebRequest.prototype.setCSRFToken = function(token) {
 };
 
 WebRequest.prototype.setSession = function(sessionid) {
-   var cookie = this._request.headers['cookie'] + `; sessionid=${sessionid}`;
-   delete this._request.headers['cookie']
-    this.setHeaders({cookie});
-    return this;
+   this.setHeaders({cookie: "sessionid=" + sessionid});
+   return this;
 };
 
 WebRequest.prototype.setHost = function(host) {
